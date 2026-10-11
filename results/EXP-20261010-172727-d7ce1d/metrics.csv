@@ -1,0 +1,6 @@
+variant_id,variant_name,degradation_type,feature_pixels,feature_density_pct,runtime_ms,stability_dice,stability_iou,ssim,mse,rmse,feature_retention_pct,feature_delta_pct,correctness_f1,correctness_precision,correctness_recall,correctness_iou
+baseline_pristine,Pristine Baseline (Uncorrupted),none,0,0.0,0.658,1.0,1.0,1.0,0.0,0.0,100.0,0.0,1.0,1.0,1.0,1.0
+deg_blur_light,"Gaussian Blur (k=5, σ=2.0)",gaussian_blur,0,0.0,0.299,1.0,1.0,1.0,0.0,0.0,100.0,0.0,1.0,1.0,1.0,1.0
+deg_noise_moderate,Gaussian Noise (σ=25.0),gaussian_noise,24234,36.9781,1.219,0.0,0.0,0.0,24045.04,155.06,100.0,0.0,0.0,0.0,0.0,0.0
+deg_brightness_attenuated,"Brightness/Contrast (-30, scale=0.85)",brightness,0,0.0,0.219,1.0,1.0,1.0,0.0,0.0,100.0,0.0,1.0,1.0,1.0,1.0
+deg_res_half,Resolution 50% Resampled,resolution_reduction,0,0.0,0.225,1.0,1.0,1.0,0.0,0.0,100.0,0.0,1.0,1.0,1.0,1.0
