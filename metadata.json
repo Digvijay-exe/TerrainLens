@@ -1,0 +1,6 @@
+{
+  "name": "TerrainLens",
+  "description": "Terrain Understanding & Robustness Analyzer — Reproducible Computer Vision and Elevation Contour Research Tool",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
