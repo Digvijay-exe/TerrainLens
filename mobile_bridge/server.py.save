@@ -1,0 +1,165 @@
+
+from flask import Flask, request, jsonify, render_template_string
+from datetime import datetime, timezone
+from pathlib import Path
+import csv
+
+app = Flask(__name__)
+DATA_DIR = Path(__file__).parent / "recordings"
+DATA_DIR.mkdir(exist_ok=True)
+
+PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TerrainLens Mobile</title>
+<style>
+body {
+  background:#101820; color:#eafaff;
+  font-family:Arial,sans-serif; padding:20px;
+  max-width:600px; margin:auto;
+}
+h1 {color:#51e5f2}
+.card {background:#1b2a36;padding:16px;
+  border-radius:12px;margin:14px 0}
+button {padding:12px;margin:5px 3px;
+  border:0;border-radius:8px;font-weight:bold}
+.start {background:#51e5f2}
+.stop {background:#ff8c8c}
+small {color:#a9bdc8}
+</style>
+</head>
+<body>
+<h1>TERRAINLENS</h1>
+<p>Mobile Field Sensor Dashboard</p>
+
+<div class="card">
+  <h3>GPS telemetry</h3>
+  <p id="status">Ready to start</p>
+  <p>Latitude: <span id="lat">--</span></p>
+  <p>Longitude: <span id="lon">--</span></p>
+  <p>Accuracy: <span id="acc">--</span></p>
+  <p>Last reading: <span id="time">--</span></p>
+</div>
+
+<div class="card">
+  <button class="start" onclick="startGPS()">Start GPS</button>
+  <button class="stop" onclick="stopGPS()">Stop GPS</button>
+  <button onclick="downloadCSV()">Export CSV</button>
+  <p><small>Readings remain in this browser until exported.
+  No automatic cloud upload.</small></p>
+</div>
+
+<script>
+let watchId = null;
+let readings = [];
+
+function startGPS() {
+  if (!navigator.geolocation) {
+    document.getElementById("status").textContent =
+      "GPS API unavailable in this browser.";
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    document.getElementById("status").textContent =
+      "Browser requires a secure connection for GPS. " +
+      "Use the file-export fallback or configure local HTTPS.";
+    return;
+  }
+
+  document.getElementById("status").textContent =
+    "Requesting location permission...";
+
+  watchId = navigator.geolocation.watchPosition(
+    position => {
+      const c = position.coords;
+      const row = {
+        timestamp: new Date().toISOString(),
+        latitude: c.latitude,
+        longitude: c.longitude,
+        accuracy_m: c.accuracy
+      };
+
+      readings.push(row);
+      document.getElementById("lat").textContent =
+        c.latitude.toFixed(6);
+      document.getElementById("lon").textContent =
+        c.longitude.toFixed(6);
+      document.getElementById("acc").textContent =
+        c.accuracy.toFixed(1) + " m";
+      document.getElementById("time").textContent =
+        row.timestamp;
+      document.getElementById("status").textContent =
+        "Recording location";
+    },
+    error => {
+      document.getElementById("status").textContent =
+        "Location error: " + error.message;
+    },
+    {enableHighAccuracy:true, maximumAge:1000, timeout:15000}
+  );
+}
+
+function stopGPS() {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  document.getElementById("status").textContent =
+    "GPS stopped. Export your readings if needed.";
+}
+
+function downloadCSV() {
+  if (!readings.length) {
+    alert("No readings recorded yet.");
+    return;
+  }
+
+  const header = "timestamp,latitude,longitude,accuracy_m";
+  const rows = readings.map(r =>
+    [r.timestamp, r.latitude, r.longitude, r.accuracy_m].join(",")
+  );
+  const blob = new Blob(
+    [[header, ...rows].join("\\n")],
+    {type:"text/csv"}
+  );
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "terrainlens_gps.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
+"""
+
+@app.get("/")
+def dashboard():
+    return render_template_string(PAGE)
+
+@app.post("/api/telemetry")
+def receive_telemetry():
+    # Accept only expected sensor fields.
+    data = request.get_json(silent=True) or {}
+    allowed = {
+        "timestamp", "latitude", "longitude",
+        "accuracy_m", "accelerometer", "gyroscope"
+    }
+    clean = {k: v for k, v in data.items() if k in allowed}
+    clean["received_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Append structured records locally; no external transmission.
+    path = DATA_DIR / "telemetry.jsonl"
+    with path.open("a", encoding="utf-8") as f:
+        import json
+        f.write(json.dumps(clean) + "\n")
+
+    return jsonify({"saved": True})
+
+if __name__ == "__main__":
+    # Debug mode intentionally disabled.
+    app.run(host="0.0.0.0", port=8765, debug=False)

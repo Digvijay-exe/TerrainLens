@@ -28,6 +28,8 @@ def render_sidebar_info() -> None:
     with st.sidebar:
         st.markdown("### 🏔️ TerrainLens")
         st.caption("Terrain Understanding & Robustness Analyzer")
+        st.page_link("pages/av_auto_route.py", label="🚘 AV Auto-Route & Root Detection", icon="🚘")
+        st.caption("Groq vision-assisted road hazard research")
         st.markdown("---")
 
         if st.session_state.get("current_data"):
