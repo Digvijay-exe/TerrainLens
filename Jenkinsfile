@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        DOCKERHUB_REPO = 'REPLACE_WITH_YOUR_DOCKERHUB_USERNAME/terrainlens'
+        DOCKERHUB_REPO = 'digvijay31/terrainlens'
     }
 
     stages {
