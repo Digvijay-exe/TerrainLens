@@ -26,6 +26,13 @@ def compute_terrain_statistics(
 
     Includes elevation distribution, slope angles (in degrees), and surface roughness.
     """
+    elevation = np.asarray(elevation).squeeze()
+    if elevation.ndim != 2:
+        raise ValueError(
+            f"Elevation data must be a 2D single-band grid; "
+            f"received shape {elevation.shape}. "
+            "Select a single elevation band before analysis."
+        )
     clean_elev = handle_missing_elevation(elevation, nodata=nodata)
 
     min_elev = float(np.min(clean_elev))
@@ -84,6 +91,13 @@ def extract_topographic_contours(
         Tuple of (binary_contour_map [0 or 255 uint8], metadata_dict).
     """
     start_time = time.perf_counter()
+    elevation = np.asarray(elevation).squeeze()
+    if elevation.ndim != 2:
+        raise ValueError(
+            f"Elevation data must be a 2D single-band grid; "
+            f"received shape {elevation.shape}. "
+            "Select a single elevation band before analysis."
+        )
     clean_elev = handle_missing_elevation(elevation, nodata=nodata)
 
     min_elev = float(np.min(clean_elev))
@@ -175,6 +189,13 @@ def analyze_elevation_raster(
             - stats: terrain geomorphometry summary
             - contour_meta: metadata of contours
     """
+    elevation = np.asarray(elevation).squeeze()
+    if elevation.ndim != 2:
+        raise ValueError(
+            f"Elevation data must be a 2D single-band grid; "
+            f"received shape {elevation.shape}. "
+            "Select a single elevation band before analysis."
+        )
     clean_elev = handle_missing_elevation(elevation, nodata=nodata)
     stats = compute_terrain_statistics(clean_elev, nodata=nodata)
     hillshade = calculate_hillshade(clean_elev, azimuth=hillshade_azimuth, altitude=hillshade_altitude)

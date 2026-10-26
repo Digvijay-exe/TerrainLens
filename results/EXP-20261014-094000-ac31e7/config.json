@@ -1,0 +1,99 @@
+{
+  "experiment_id": "EXP-20261014-094000-ac31e7",
+  "name": "Robustness Benchmark: test1.jpg",
+  "description": "",
+  "created_at_utc": "2026-10-14T04:10:00.304211+00:00",
+  "completed_at_utc": "2026-10-14T04:10:00.459393+00:00",
+  "status": "COMPLETED",
+  "environment": {
+    "python": "3.13.5",
+    "terrainlens": "0.1.0",
+    "opencv": "5.0.0",
+    "numpy": "2.5.4",
+    "rasterio": "1.5.2",
+    "scipy": "1.18.1",
+    "scikit-image": "0.26.0",
+    "pillow": "12.3.0",
+    "pandas": "3.0.6"
+  },
+  "dataset": {
+    "file_name": "test1.jpg",
+    "file_size_bytes": 93891,
+    "checksum_sha256": "f970a34f3c76e5cef4de2640f7ffa34e5772b6fde34cf4bde5906cb09381f98b",
+    "mode": "terrain_image",
+    "shape": [
+      360,
+      540,
+      3
+    ],
+    "dtype": "uint8",
+    "nodata": null
+  },
+  "has_reference_mask": false,
+  "preprocessing": {
+    "mode": "terrain_image",
+    "input_shape": [
+      360,
+      540,
+      3
+    ],
+    "input_dtype": "uint8",
+    "smooth_applied": true,
+    "kernel_size": 5,
+    "sigma": 1.0,
+    "resize_factor": 1.0,
+    "nodata": null,
+    "output_shape": [
+      360,
+      540
+    ],
+    "output_dtype": "uint8"
+  },
+  "feature_extraction": {
+    "method": "canny",
+    "parameters": {
+      "low_threshold": 50,
+      "high_threshold": 150,
+      "aperture_size": 3
+    }
+  },
+  "degradation_suite": [
+    {
+      "id": "deg_blur_light",
+      "type": "gaussian_blur",
+      "name": "Gaussian Blur (k=5, \u03c3=2.0)",
+      "params": {
+        "kernel_size": 5,
+        "sigma": 2.0
+      }
+    },
+    {
+      "id": "deg_noise_moderate",
+      "type": "gaussian_noise",
+      "name": "Gaussian Noise (\u03c3=25.0)",
+      "params": {
+        "sigma": 25.0,
+        "seed": 42
+      }
+    },
+    {
+      "id": "deg_brightness_attenuated",
+      "type": "brightness",
+      "name": "Brightness/Contrast (-30, scale=0.85)",
+      "params": {
+        "offset": -30.0,
+        "scale": 0.85
+      }
+    },
+    {
+      "id": "deg_res_half",
+      "type": "resolution_reduction",
+      "name": "Resolution 50% Resampled",
+      "params": {
+        "scale_factor": 0.5,
+        "interpolation": "bilinear"
+      }
+    }
+  ],
+  "terrain_statistics": null
+}

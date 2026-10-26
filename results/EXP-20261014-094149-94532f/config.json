@@ -1,0 +1,99 @@
+{
+  "experiment_id": "EXP-20261014-094149-94532f",
+  "name": "Robustness Benchmark: test2.jpg",
+  "description": "",
+  "created_at_utc": "2026-10-14T04:11:49.155807+00:00",
+  "completed_at_utc": "2026-10-14T04:11:49.626396+00:00",
+  "status": "COMPLETED",
+  "environment": {
+    "python": "3.13.5",
+    "terrainlens": "0.1.0",
+    "opencv": "5.0.0",
+    "numpy": "2.5.4",
+    "rasterio": "1.5.2",
+    "scipy": "1.18.1",
+    "scikit-image": "0.26.0",
+    "pillow": "12.3.0",
+    "pandas": "3.0.6"
+  },
+  "dataset": {
+    "file_name": "test2.jpg",
+    "file_size_bytes": 56969,
+    "checksum_sha256": "55027d1eb4587595c4dc5e7977bc527daa59bc448c208752c3d4e50ef13ff3d8",
+    "mode": "terrain_image",
+    "shape": [
+      554,
+      554,
+      3
+    ],
+    "dtype": "uint8",
+    "nodata": null
+  },
+  "has_reference_mask": false,
+  "preprocessing": {
+    "mode": "terrain_image",
+    "input_shape": [
+      554,
+      554,
+      3
+    ],
+    "input_dtype": "uint8",
+    "smooth_applied": true,
+    "kernel_size": 5,
+    "sigma": 1.0,
+    "resize_factor": 1.0,
+    "nodata": null,
+    "output_shape": [
+      554,
+      554
+    ],
+    "output_dtype": "uint8"
+  },
+  "feature_extraction": {
+    "method": "canny",
+    "parameters": {
+      "low_threshold": 50,
+      "high_threshold": 150,
+      "aperture_size": 3
+    }
+  },
+  "degradation_suite": [
+    {
+      "id": "custom_blur",
+      "type": "gaussian_blur",
+      "name": "Gaussian Blur (k=5, \u03c3=2.0)",
+      "params": {
+        "kernel_size": 5,
+        "sigma": 2.0
+      }
+    },
+    {
+      "id": "custom_noise",
+      "type": "gaussian_noise",
+      "name": "Gaussian Noise (\u03c3=25.0)",
+      "params": {
+        "sigma": 25.0,
+        "seed": 42
+      }
+    },
+    {
+      "id": "custom_illumination",
+      "type": "brightness",
+      "name": "Illumination (scale=0.85, offset=-30.0)",
+      "params": {
+        "offset": -30.0,
+        "scale": 0.85
+      }
+    },
+    {
+      "id": "custom_resolution",
+      "type": "resolution_reduction",
+      "name": "Resolution Downsampled (50%)",
+      "params": {
+        "scale_factor": 0.5,
+        "interpolation": "bilinear"
+      }
+    }
+  ],
+  "terrain_statistics": null
+}

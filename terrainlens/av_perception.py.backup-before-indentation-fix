@@ -1,0 +1,291 @@
+"""Groq vision-assisted road perception with conservative, deterministic decision rules.
+
+This module is a research prototype, not a certified autonomous-driving controller.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import urllib.error
+import urllib.request
+from typing import Any
+
+import cv2
+import numpy as np
+
+DEFAULT_MODEL = "qwen/qwen3.8-27b"
+ALLOWED_HAZARDS = {
+    "pothole", "crack", "raised_root_or_heave", "pavement_buckling",
+    "debris", "water_or_mud", "road_edge", "other_obstacle",
+}
+ALLOWED_SEVERITIES = {"low", "medium", "high", "critical"}
+
+
+class GroqPerceptionError(RuntimeError):
+    """Raised when Groq is unavailable or returns unusable perception data."""
+
+
+def get_groq_api_key() -> str | None:
+    """Read the key from environment first, then Streamlit secrets if available."""
+    key = os.getenv("GROQ_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        import streamlit as st
+        return str(st.secrets.get("GROQ_API_KEY", "")).strip() or None
+    except Exception:
+        return None
+
+
+def _image_data_url(image_bytes: bytes) -> str:
+    """Validate, resize and encode an uploaded image for the vision API."""
+    image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("The uploaded file is not a readable image.")
+    h, w = image.shape[:2]
+    if min(h, w) < 160:
+        raise ValueError("Image is too small for meaningful road analysis (minimum 160 px on each side).")
+    max_side = 1600
+    if max(h, w) > max_side:
+        scale = max_side / max(h, w)
+        image = cv2.resize(image, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    if not ok:
+        raise ValueError("Could not encode the image for analysis.")
+    return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+
+def _clamp01(value: Any, default: float = 0.0) -> float:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(value):
+        return default
+    return min(1.0, max(0.0, value))
+
+
+def _normalise_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalize model output; never trust model-supplied actions."""
+    hazards = []
+    raw_hazards = payload.get("hazards", [])
+    if not isinstance(raw_hazards, list):
+        raw_hazards = []
+    for item in raw_hazards[:30]:
+        if not isinstance(item, dict):
+            continue
+        box = item.get("bbox")
+        if not isinstance(box, list) or len(box) != 4:
+            continue
+        try:
+            coords = [float(v) for v in box]
+        except (TypeError, ValueError):
+            continue
+        if not all(np.isfinite(v) and 0.0 <= v <= 1.0 for v in coords):
+            continue
+        x1, y1, x2, y2 = coords
+        if x2 <= x1 or y2 <= y1:
+            continue
+        kind = str(item.get("type", "other_obstacle")).lower().strip()
+        if kind not in ALLOWED_HAZARDS:
+            kind = "other_obstacle"
+        severity = str(item.get("severity", "medium")).lower().strip()
+        if severity not in ALLOWED_SEVERITIES:
+            severity = "medium"
+        hazards.append({
+            "type": kind, "severity": severity,
+            "confidence": _clamp01(item.get("confidence"), 0.3),
+            "bbox": [x1, y1, x2, y2],
+            "description": str(item.get("description", ""))[:240],
+            "in_drivable_corridor": bool(item.get("in_drivable_corridor", False)),
+        })
+
+    corridor = payload.get("drivable_corridor", [])
+    clean_corridor = []
+    if isinstance(corridor, list):
+        for point in corridor[:30]:
+            if isinstance(point, list) and len(point) == 2:
+                try:
+                    x, y = float(point[0]), float(point[1])
+                except (TypeError, ValueError):
+                    continue
+                if np.isfinite(x) and np.isfinite(y) and 0 <= x <= 1 and 0 <= y <= 1:
+                    clean_corridor.append([x, y])
+    if len(clean_corridor) < 3:
+        clean_corridor = []
+
+    visibility = str(payload.get("visibility", "unknown")).lower()
+    if visibility not in {"clear", "moderate", "poor", "unknown"}:
+        visibility = "unknown"
+    return {
+        "scene_summary": str(payload.get("scene_summary", "No summary supplied."))[:500],
+        "visibility": visibility,
+        "road_surface": str(payload.get("road_surface", "unknown"))[:100],
+        "hazards": hazards,
+        "drivable_corridor": clean_corridor,
+        "uncertainties": [
+            str(x)[:240] for x in payload.get("uncertainties", [])[:10]
+        ] if isinstance(payload.get("uncertainties", []), list) else [],
+        "image_quality_warning": str(payload.get("image_quality_warning", ""))[:240],
+    }
+
+
+def analyze_road_image(
+    image_bytes: bytes,
+    api_key: str | None = None,
+    model: str | None = None,
+    timeout: int = 45,
+) -> dict[str, Any]:
+    """Call Groq's OpenAI-compatible vision endpoint and validate its JSON response."""
+    key = (api_key or get_groq_api_key() or "").strip()
+    if not key:
+        raise GroqPerceptionError(
+            "GROQ_API_KEY is not configured. Set it in your environment or Streamlit secrets."
+        )
+    image_url = _image_data_url(image_bytes)
+    prompt = """You are a cautious road-scene perception assistant for a research prototype.
+Analyze ONLY visible evidence in the supplied single road photograph. Do not claim a hidden tree root is proven; use raised_root_or_heave only for a visibly raised/buckled road surface and explicitly state cause is uncertain. Do not invent physical dimensions, distance in metres, speed, depth, or sensor readings.
+Return one JSON object with this exact shape:
+{
+ "scene_summary":"brief evidence-grounded summary",
+ "visibility":"clear|moderate|poor|unknown",
+ "road_surface":"short description",
+ "hazards":[
+  {"type":"pothole|crack|raised_root_or_heave|pavement_buckling|debris|water_or_mud|road_edge|other_obstacle",
+   "severity":"low|medium|high|critical","confidence":0.0,
+   "bbox":[x1,y1,x2,y2],"description":"visible evidence only",
+   "in_drivable_corridor":true}
+ ],
+ "drivable_corridor":[[x,y],[x,y],[x,y]],
+ "uncertainties":["list what cannot be established from this image"],
+ "image_quality_warning":"empty string or warning"
+}
+All bbox and corridor coordinates must be normalized 0..1 relative to image width/height. bbox is [left,top,right,bottom]. The corridor is a polygon from near image bottom to visible road ahead, if it can be reasonably inferred; otherwise use []. Include only plausible hazards with localized boxes. Be conservative: do not label ordinary texture as a crack or root. Confidence is a subjective model estimate, not calibrated probability. Never return a driving action or claim the route is safe."""
+    body = {
+        "model": model or os.getenv("GROQ_VISION_MODEL", DEFAULT_MODEL),
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ],
+        }],
+        "temperature": 0.1,
+        "max_completion_tokens": 1800,
+        "response_format": {"type": "json_object"},
+    }
+    request = urllib.request.Request(
+        "https://api.groq.com/openai/v1/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        content = result["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:700]
+        if exc.code in (401, 403):
+    raise GroqPerceptionError(
+        f"Groq HTTP {exc.code}: {detail}"
+    ) from exc
+        if exc.code == 429:
+            raise GroqPerceptionError("Groq rate limit reached. Wait briefly and try again.") from exc
+        raise GroqPerceptionError(f"Groq API returned HTTP {exc.code}: {detail}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise GroqPerceptionError(f"Could not reach Groq API: {exc}") from exc
+    except (KeyError, IndexError, json.JSONDecodeError, TypeError) as exc:
+        raise GroqPerceptionError("Groq returned an invalid or non-JSON response. Retry the analysis.") from exc
+    if not isinstance(parsed, dict):
+        raise GroqPerceptionError("Groq response must be a JSON object.")
+    return _normalise_payload(parsed)
+
+
+def point_in_polygon(point: tuple[float, float], polygon: list[list[float]]) -> bool:
+    """Ray-casting point-in-polygon for normalized coordinates."""
+    x, y = point
+    inside = False
+    j = len(polygon) - 1
+    for i, (xi, yi) in enumerate(polygon):
+        xj, yj = polygon[j]
+        if ((yi > y) != (yj > y)) and (
+            x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi
+        ):
+            inside = not inside
+        j = i
+    return inside
+
+
+def decide_driving_action(perception: dict[str, Any]) -> dict[str, Any]:
+    """Conservative rule-based advisory. This is not vehicle-control software."""
+    hazards = perception.get("hazards", [])
+    corridor = perception.get("drivable_corridor", [])
+    visibility = perception.get("visibility", "unknown")
+    relevant = []
+    severity_weight = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+    for hazard in hazards:
+        x1, y1, x2, y2 = hazard["bbox"]
+        center = ((x1 + x2) / 2, (y1 + y2) / 2)
+        inside = hazard.get("in_drivable_corridor", False)
+        if corridor:
+            inside = inside or point_in_polygon(center, corridor)
+        # Ignore weak detections for route-risk escalation, but retain them in display.
+        if inside and hazard.get("confidence", 0) >= 0.45:
+            relevant.append(hazard)
+    critical = any(h["severity"] == "critical" for h in relevant)
+    high = any(h["severity"] == "high" for h in relevant)
+    poor_visibility = visibility in {"poor", "unknown"}
+    if critical:
+        action, reason = "EMERGENCY_STOP", "A high-confidence critical hazard overlaps the estimated drivable corridor."
+    elif high:
+        action, reason = "REDUCE_SPEED", "A high-severity hazard may obstruct the estimated drivable corridor."
+    elif relevant or poor_visibility:
+        action, reason = "REDUCE_SPEED", "Hazards or visibility uncertainty require a cautious approach."
+    elif not corridor:
+        action, reason = "REDUCE_SPEED", "A reliable drivable corridor could not be established from this image."
+    else:
+        action, reason = "PROCEED_SAFE", "No high-confidence hazard was localized inside the estimated corridor; image-only checks are not a safety guarantee."
+    risk = min(100, sum(severity_weight[h["severity"]] * h["confidence"] * 18 for h in relevant))
+    if poor_visibility:
+        risk = max(risk, 35)
+    return {
+        "action": action,
+        "reason": reason,
+        "risk_score": round(risk),
+        "corridor_hazards": relevant,
+        "advisory_only": True,
+    }
+
+
+def render_annotated_image(image_bytes: bytes, perception: dict[str, Any]) -> bytes:
+    """Draw normalized corridor polygon and localized hazard boxes."""
+    image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Invalid image.")
+    h, w = image.shape[:2]
+    corridor = perception.get("drivable_corridor", [])
+    if len(corridor) >= 3:
+        pts = np.array([[int(x * w), int(y * h)] for x, y in corridor], np.int32)
+        overlay = image.copy()
+        cv2.fillPoly(overlay, [pts], (0, 180, 130))
+        image = cv2.addWeighted(overlay, 0.18, image, 0.82, 0)
+        cv2.polylines(image, [pts], True, (0, 220, 170), 3)
+    colors = {"low": (30, 200, 255), "medium": (0, 150, 255), "high": (0, 80, 255), "critical": (0, 0, 255)}
+    for hazard in perception.get("hazards", []):
+        x1, y1, x2, y2 = hazard["bbox"]
+        a, b, c, d = int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)
+        color = colors[hazard["severity"]]
+        cv2.rectangle(image, (a, b), (c, d), color, 2)
+        label = f'{hazard["type"].replace("_", " ")} | {hazard["severity"]} | {hazard["confidence"]:.2f}'
+        font_scale = max(0.45, min(0.7, w / 1200))
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 1)
+        top = max(0, b - th - 8)
+        cv2.rectangle(image, (a, top), (min(w - 1, a + tw + 8), b), color, -1)
+        cv2.putText(image, label, (a + 4, max(th, b - 5)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (15, 20, 30), 1, cv2.LINE_AA)
+    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    if not ok:
+        raise ValueError("Could not render annotated image.")
+    return encoded.tobytes()

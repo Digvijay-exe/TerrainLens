@@ -1,0 +1,6 @@
+variant_id,variant_name,degradation_type,feature_pixels,feature_density_pct,runtime_ms,stability_dice,stability_iou,ssim,mse,rmse,feature_retention_pct,feature_delta_pct
+baseline_pristine,Pristine Baseline (Uncorrupted),none,40699,13.2606,13.426,1.0,1.0,1.0,0.0,0.0,100.0,0.0
+custom_blur,"Gaussian Blur (k=5, σ=2.0)",gaussian_blur,17353,5.654,42.762,0.3816,0.2358,0.584,7605.56,87.21,42.64,-57.36
+custom_noise,Gaussian Noise (σ=25.0),gaussian_noise,113790,37.0753,12.001,0.2596,0.1492,0.0636,24233.42,155.67,279.59,179.59
+custom_illumination,"Illumination (scale=0.85, offset=-30.0)",brightness,35251,11.4856,3.076,0.8822,0.7892,0.8789,1895.35,43.54,86.61,-13.39
+custom_resolution,Resolution Downsampled (50%),resolution_reduction,31524,10.2712,7.932,0.533,0.3633,0.647,7146.45,84.54,77.46,-22.54
